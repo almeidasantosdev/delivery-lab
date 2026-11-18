@@ -1,0 +1,91 @@
+# Mesma sequencia do GitHub Actions, no formato do Azure DevOps.
+# Para executar: ligue o repositorio a um projeto Azure DevOps, instale a
+# extensao SonarCloud e crie a service connection "SonarCloud" mais a
+# variavel secreta SONAR_TOKEN.
+
+trigger:
+  branches:
+    include:
+      - "*"
+
+pr:
+  branches:
+    include:
+      - "*"
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Teste
+    jobs:
+      - job: test
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: "22.x"
+          - script: npm ci && npm test
+            displayName: Testes
+
+  - stage: Gates
+    dependsOn: Teste
+    jobs:
+      - job: imagem
+        steps:
+          - script: docker build -f docker/Dockerfile -t delivery-lab:ci .
+            displayName: Build da imagem
+          - script: |
+              curl -fsSL -o trivy.tar.gz https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz
+              tar -xzf trivy.tar.gz -C /usr/local/bin trivy
+              trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed delivery-lab:ci
+            displayName: Trivy
+
+      - job: segredos
+        steps:
+          - script: |
+              curl -fsSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+              tar -xzf gitleaks.tar.gz -C /usr/local/bin gitleaks
+              gitleaks detect --source . --redact --config .gitleaks.toml --verbose
+            displayName: gitleaks
+
+      - job: terraform
+        steps:
+          - script: |
+              curl -fsSL -o terraform.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+              unzip -o terraform.zip -d /usr/local/bin
+              terraform fmt -check -recursive
+              terraform init -backend=false
+              terraform validate
+            workingDirectory: terraform
+            displayName: Terraform
+
+      - job: sonar
+        steps:
+          - task: SonarCloudPrepare@3
+            inputs:
+              SonarCloud: SonarCloud
+              organization: almeidasantosdev
+              scannerMode: CLI
+              configMode: manual
+              cliProjectKey: almeidasantosdev_delivery-lab
+              cliProjectName: delivery-lab
+              extraProperties: |
+                sonar.sources=src
+                sonar.tests=src/test
+                sonar.exclusions=src/test/**
+                sonar.sourceEncoding=UTF-8
+          - task: SonarCloudAnalyze@3
+          - script: bash scripts/sonar-gate.sh
+            displayName: Vulnerabilidade alta interrompe a entrega
+            env:
+              SONAR_TOKEN: $(SONAR_TOKEN)
+              SONAR_PROJECT_KEY: almeidasantosdev_delivery-lab
+
+  - stage: Entrega
+    dependsOn: Gates
+    condition: succeeded()
+    jobs:
+      - job: deliver
+        steps:
+          - script: echo "Gates ok. A publicacao da imagem continua desligada de proposito."
+            displayName: Entrega liberada
