@@ -1,0 +1,28 @@
+{
+  "name": "delivery-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Laboratorio de entrega: webhook idempotente, retentativa, Docker, CI e observabilidade.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "node dist/migrate.js",
+    "test": "tsc && node --test dist/test/backoff.test.js dist/test/validate.test.js dist/test/webhook.integration.test.js"
+  },
+  "dependencies": {
+    "@prometheus-io/client": "^0.16.1",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}
