@@ -1,0 +1,15 @@
+title = "delivery-lab"
+
+[allowlist]
+description = "Senha local do laboratorio. Nao abre acesso a nuvem nem a dados reais."
+paths = [
+  '''docker-compose\.yml''',
+  '''\.env\.example''',
+  '''README\.md''',
+  '''\.github/workflows/ci\.yml''',
+  '''scripts/demo\.ps1''',
+]
+regexes = [
+  '''postgres://delivery:delivery@''',
+  '''GF_SECURITY_ADMIN_PASSWORD:\s*admin''',
+]
