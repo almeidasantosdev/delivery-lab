@@ -24,7 +24,7 @@ O log registra a chave e o id do job. O corpo do webhook nao entra no log.
 | Fila | Tabela `delivery_jobs` no proprio Postgres |
 | Metricas | @prometheus-io/client, Prometheus, Grafana |
 | Empacotamento | Dockerfile multi-stage, usuario `node`, Docker Compose |
-| Esteira | GitHub Actions, Trivy, gitleaks |
+| Esteira | GitHub Actions, Azure Pipelines, Trivy, gitleaks, SonarCloud |
 | Nuvem | Terraform: VPC, EC2 e bucket S3 privado na AWS |
 | Testes | `node:test` e PGlite (PostgreSQL em memoria, so no `npm test`) |
 
@@ -141,13 +141,24 @@ npm start
 
 ### 5. Esteira
 
-O arquivo `.github/workflows/ci.yml` roda em todo push e pull request:
+O arquivo `.github/workflows/ci.yml` roda em todo push e pull request. O job `deliver` so executa depois dos gates:
 
 - `npm test`
 - build da imagem `delivery-lab:ci` sem publicar
 - Trivy, interrompendo o job se houver vulnerabilidade critica com correcao disponivel
 - gitleaks no historico do Git
 - `terraform fmt` e `terraform validate`
+- SonarCloud. Vulnerabilidade de severidade alta ou bloqueadora interrompe a entrega
+
+`azure-pipelines.yml` repete essa sequencia no formato do Azure DevOps. Ele passa a executar quando o repositorio estiver ligado a um projeto com a extensao SonarCloud, a service connection `SonarCloud` e a variavel secreta `SONAR_TOKEN`.
+
+No GitHub, o mesmo token entra como segredo do repositorio:
+
+```powershell
+gh secret set SONAR_TOKEN --repo almeidasantosdev/delivery-lab
+```
+
+A organizacao e a chave do projeto estao em `sonar-project.properties`. No SonarCloud, importe o repositorio publico com essa mesma chave.
 
 ### 6. Terraform
 
@@ -191,7 +202,10 @@ docker/Dockerfile    build em dois estagios, processo sem root
 docker-compose.yml   API, Postgres, Prometheus e Grafana
 prometheus/          scrape da API a cada 5s
 grafana/             datasource e dashboard versionados
-.github/workflows/   esteira
+.github/workflows/   esteira no GitHub Actions
+azure-pipelines.yml  a mesma esteira no Azure DevOps
+sonar-project.properties  projeto do SonarCloud
+scripts/sonar-gate.sh     bloqueia vulnerabilidade alta
 terraform/           VPC, EC2 e S3
 docs/adr/            decisoes de esteira, servico unico e AWS
 scripts/demo.ps1     chamada de exemplo

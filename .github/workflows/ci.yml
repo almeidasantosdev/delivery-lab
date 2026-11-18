@@ -31,7 +31,7 @@ jobs:
           push: false
           load: true
           tags: delivery-lab:ci
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: delivery-lab:ci
           format: table
@@ -62,3 +62,34 @@ jobs:
         run: |
           terraform init -backend=false
           terraform validate
+
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Token do SonarCloud
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "Defina o segredo SONAR_TOKEN. Sem ele o gate nao libera a entrega."
+            exit 1
+          fi
+      - uses: SonarSource/sonarqube-scan-action@v8.5.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+      - name: Vulnerabilidade alta interrompe a entrega
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: almeidasantosdev_delivery-lab
+        run: bash scripts/sonar-gate.sh
+
+  deliver:
+    needs: [test, image, secrets, terraform, sonar]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Entrega liberada
+        run: echo "Testes, imagem, segredos, Terraform e SonarCloud passaram. A publicacao da imagem continua desligada de proposito."
