@@ -2,27 +2,39 @@
   "name": "delivery-lab",
   "version": "0.1.0",
   "private": true,
-  "description": "Laboratorio de entrega: webhook idempotente, retentativa, Docker, CI e observabilidade.",
-  "type": "module",
+  "description": "Laboratorio de entrega: webhook idempotente, outbox, RabbitMQ, NestJS e observabilidade.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:worker": "node dist/worker-main.js",
     "migrate": "node dist/migrate.js",
-    "test": "tsc && node --test dist/test/backoff.test.js dist/test/validate.test.js dist/test/webhook.integration.test.js"
+    "test": "jest --testPathPattern=src/ --runInBand",
+    "test:integration": "jest --testPathPattern=test/ --runInBand"
   },
   "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
     "@prometheus-io/client": "^0.16.1",
-    "express": "^4.21.2",
-    "pg": "^8.13.1"
+    "amqplib": "^0.10.5",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.2.17",
+    "@nestjs/testing": "^10.4.15",
+    "@types/amqplib": "^0.10.7",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
     "typescript": "^5.7.2"
   }
 }
