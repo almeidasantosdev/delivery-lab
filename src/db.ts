@@ -1,9 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
-const sqlPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "sql", "001_init.sql");
+const sqlPath = path.resolve(__dirname, "..", "sql", "001_init.sql");
 
 export interface Queryable {
   query<T extends QueryResultRow = QueryResultRow>(

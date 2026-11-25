@@ -1,17 +1,17 @@
 # Delivery Lab
 
-Laboratorio de entrega continua. Uma API recebe um webhook de pagamento, grava o evento uma unica vez e um worker tenta entregar esse evento para um provedor simulado. Se o provedor falha, a tentativa volta para a fila com espera crescente. Prometheus le as metricas e o Grafana mostra se a API esta no ar.
+Laboratorio de entrega continua. Uma API em NestJS recebe um webhook de pagamento, grava o evento uma unica vez e deixa a entrega numa tabela outbox. Um worker publica essa linha no RabbitMQ e consome a fila. Se o provedor simulado falha, a mensagem volta com espera crescente. Na quinta falha ela vai para a dead-letter queue. Prometheus le as metricas e o Grafana mostra se a API esta no ar.
 
 Os dados sao ficticios. Nao ha chave de pagamento, cliente real nem segredo de producao.
 
 ## O que faz
 
-1. `POST /webhooks/payments` grava o evento com uma chave de idempotencia. A mesma chave, enviada de novo, devolve o job que ja existe e nao cria outro.
-2. O worker pega um job pendente com `FOR UPDATE SKIP LOCKED`. Duas instancias nao processam o mesmo job.
-3. O provedor e simulado. `fail_until_attempt` diz quantas tentativas iniciais devem falhar com `provider_timeout`. Depois disso o job fica `delivered`.
-4. Cada falha agenda a proxima tentativa em 1s, 2s, 4s, ate o teto de 60s. Na quinta falha o job fica `failed`.
-5. Se o processo morre com um job em `processing` por mais de 30s, o proximo ciclo devolve esse job para `pending`.
-6. `GET /metrics` expoe contadores para o Prometheus.
+1. `POST /webhooks/payments` grava o evento, o job e uma linha no outbox na mesma transacao. A mesma chave, enviada de novo, devolve o job que ja existe e nao cria outro.
+2. O worker publica o outbox no RabbitMQ com `FOR UPDATE SKIP LOCKED`, para dois publicadores nao enviarem a mesma linha ao mesmo tempo.
+3. O consumidor le a fila `delivery.jobs`. O provedor e simulado. `fail_until_attempt` diz quantas tentativas iniciais devem falhar com `provider_timeout`. Depois disso o job fica `delivered`.
+4. Cada falha publica a proxima tentativa numa fila com TTL: 1s, 2s, 4s, ate o teto de 60s. Na quinta falha o job fica `failed` e a mensagem vai para `delivery.jobs.dlq`.
+5. Se o worker morre depois de reservar a tentativa, o RabbitMQ reentrega a mensagem e o consumidor conclui essa mesma tentativa.
+6. `GET /metrics` na API e no worker expoe contadores para o Prometheus.
 
 O log registra a chave e o id do job. O corpo do webhook nao entra no log.
 
@@ -19,14 +19,16 @@ O log registra a chave e o id do job. O corpo do webhook nao entra no log.
 
 | Parte | Ferramenta |
 | --- | --- |
-| API | Node.js 22, TypeScript, Express |
+| API | Node.js 22, TypeScript, NestJS |
 | Banco | PostgreSQL 16 |
-| Fila | Tabela `delivery_jobs` no proprio Postgres |
+| Fila | Outbox no Postgres e RabbitMQ, com retry e DLQ |
+| Worker | Processo separado, consome `delivery.jobs` |
 | Metricas | @prometheus-io/client, Prometheus, Grafana |
 | Empacotamento | Dockerfile multi-stage, usuario `node`, Docker Compose |
 | Esteira | GitHub Actions, Azure Pipelines, Trivy, gitleaks, SonarCloud |
 | Nuvem | Terraform: VPC, EC2 e bucket S3 privado na AWS |
-| Testes | `node:test` e PGlite (PostgreSQL em memoria, so no `npm test`) |
+| Testes | Jest. Integracao com Postgres e RabbitMQ no GitHub Actions |
+| Cluster | Manifestos no repositorio irmao `delivery-lab-k8s` |
 
 Decisoes curtas estao em `docs/adr/`.
 
@@ -34,10 +36,13 @@ Decisoes curtas estao em `docs/adr/`.
 
 ```mermaid
 flowchart LR
-  cliente[Cliente] --> api[API Node]
+  cliente[Cliente] --> api[API NestJS]
   api --> postgres[(PostgreSQL)]
-  worker[Worker no mesmo processo] --> postgres
+  worker[Worker] --> postgres
+  worker --> rabbit[RabbitMQ]
+  rabbit --> worker
   api --> prometheus[Prometheus]
+  worker --> prometheus
   prometheus --> grafana[Grafana]
   push[git push] --> actions[GitHub Actions]
   actions --> imagem[Imagem Docker]
@@ -51,19 +56,28 @@ A esteira constroi e analisa a imagem. Ela ainda nao publica a imagem nem aplica
 ### Pre-requisitos
 
 - Node.js 22 ou superior, para testar e rodar a API fora do Docker
-- Docker Compose v2, para subir API, PostgreSQL, Prometheus e Grafana
+- Docker Compose v2, para subir API, worker, PostgreSQL, RabbitMQ, Prometheus e Grafana
 - Terraform 1.5 ou superior e credenciais AWS, somente se for criar a infraestrutura
 
-### 1. Testar sem Docker
+### 1. Testar
 
-Na raiz do repositorio:
+Na raiz do repositorio, os testes unitarios nao precisam de Docker:
 
 ```powershell
 npm ci
 npm test
 ```
 
-O teste sobe um PostgreSQL em memoria, grava um webhook, repete a mesma chave, simula duas falhas e confirma a entrega. Nao precisa de banco instalado na maquina.
+O teste de integracao usa o Postgres e o RabbitMQ do Compose. Ele apaga as tabelas `webhook_events`, `delivery_jobs` e `outbox` do banco apontado por `DATABASE_URL`.
+
+```powershell
+docker compose up -d postgres rabbitmq
+$env:DATABASE_URL = "postgres://delivery:delivery@localhost:5433/delivery"
+$env:RABBITMQ_URL = "amqp://delivery:delivery@localhost:5672"
+npm run test:integration
+```
+
+No GitHub Actions, o job `test` sobe os dois servicos e roda as duas suites. O cenario cobre idempotencia, publicacao, consumo com retentativa e a DLQ.
 
 ### 2. Subir o laboratorio
 
@@ -74,8 +88,10 @@ docker compose up --build
 | Servico | Endereco | Acesso local |
 | --- | --- | --- |
 | API | http://localhost:3000 | sem login |
+| Worker | http://localhost:3002 | sem login, `/health` e `/metrics` |
 | Grafana | http://localhost:3001 | `admin` / `admin` |
 | Prometheus | http://localhost:9090 | sem login |
+| RabbitMQ | `localhost:5672` | usuario `delivery`, senha `delivery` |
 | PostgreSQL | `localhost:5433` | usuario `delivery`, senha `delivery`, banco `delivery` |
 
 Essa senha vale apenas para o Compose na sua maquina. O bucket da AWS nasce fechado para acesso publico.
@@ -126,24 +142,25 @@ Consultas:
 - `GET /jobs/:id` — so o job
 - `GET /metrics` — texto no formato do Prometheus
 
-### 4. Rodar a API fora do Compose
+### 4. Rodar fora do Compose
 
-Suba apenas o Postgres, ou use o que o Compose ja publicou na porta 5433.
+Suba o Postgres e o RabbitMQ, ou use o que o Compose ja publicou.
 
 ```powershell
 Copy-Item .env.example .env
 $env:DATABASE_URL = "postgres://delivery:delivery@localhost:5433/delivery"
+$env:RABBITMQ_URL = "amqp://delivery:delivery@localhost:5672"
 npm ci
 npm start
 ```
 
-`npm start` aplica o schema e abre a porta 3000. `npm run migrate` aplica o schema e encerra.
+`npm start` aplica o schema e abre a API na porta 3000. Em outro terminal, `npm run start:worker` publica o outbox e consome o RabbitMQ. `npm run migrate` aplica o schema e encerra. Sem o worker, o webhook fica gravado e nao e entregue.
 
 ### 5. Esteira
 
 O arquivo `.github/workflows/ci.yml` roda em todo push e pull request. O job `deliver` so executa depois dos gates:
 
-- `npm test`
+- `npm test` e `npm run test:integration`
 - build da imagem `delivery-lab:ci` sem publicar
 - Trivy, interrompendo o job se houver vulnerabilidade critica com correcao disponivel
 - gitleaks no historico do Git
@@ -193,24 +210,30 @@ docker compose down
 
 `docker compose down -v` tambem apaga o volume do Postgres.
 
+## Kubernetes
+
+Os manifestos, o Kind e o HPA ficam em [delivery-lab-k8s](https://github.com/almeidasantosdev/delivery-lab-k8s). Este repositorio so constroi a imagem. A tag usada la continua `delivery-lab:local`, a partir de `docker/Dockerfile`. O `GET /health` da API continua na porta 3000 e consulta o Postgres.
+
+Aquele repositorio ainda sobe um unico container, com a API e o worker no mesmo processo. Aqui o worker e outro comando, `node dist/worker-main.js`, e a entrega depende do RabbitMQ.
+
 ## Estrutura
 
 ```text
-src/                 API, worker e testes
-sql/001_init.sql     schema aplicado na subida
+src/                 API NestJS, worker e testes Jest
+sql/001_init.sql     schema, incluindo a tabela outbox
 docker/Dockerfile    build em dois estagios, processo sem root
-docker-compose.yml   API, Postgres, Prometheus e Grafana
-prometheus/          scrape da API a cada 5s
+docker-compose.yml   API, worker, Postgres, RabbitMQ, Prometheus e Grafana
+prometheus/          scrape da API e do worker a cada 5s
 grafana/             datasource e dashboard versionados
 .github/workflows/   esteira no GitHub Actions
-azure-pipelines.yml  a mesma esteira no Azure DevOps
+azure-pipelines.yml  esboco da esteira no Azure DevOps
 sonar-project.properties  projeto do SonarCloud
 scripts/sonar-gate.sh     bloqueia vulnerabilidade alta
 terraform/           VPC, EC2 e S3
-docs/adr/            decisoes de esteira, servico unico e AWS
+docs/adr/            decisoes de esteira, fila e AWS
 scripts/demo.ps1     chamada de exemplo
 ```
 
 ## Limites deste laboratorio
 
-O provedor de pagamento e uma funcao que falha de proposito. A imagem construida na esteira nao e enviada a um registry. A EC2 do Terraform instala o Docker e para por ai. Um job preso em `processing` so volta para a fila depois de 30 segundos.
+O provedor de pagamento e uma funcao que falha de proposito. A imagem construida na esteira nao e enviada a um registry. A EC2 do Terraform instala o Docker e para por ai. O RabbitMQ deste Compose nao publica a interface de administracao. O repositorio de Kubernetes ainda nao inclui o broker nem o processo do worker.

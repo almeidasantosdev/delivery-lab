@@ -1,7 +1,9 @@
-# Mesma sequencia do GitHub Actions, no formato do Azure DevOps.
-# Para executar: ligue o repositorio a um projeto Azure DevOps, instale a
+# Esboco da esteira no formato do Azure DevOps. A esteira que roda e o
+# GitHub Actions. O npm test daqui cobre so a suite unitaria. A integracao
+# com Postgres e RabbitMQ esta no workflow ci.yml.
+# Para executar no Azure: ligue o repositorio a um projeto, instale a
 # extensao SonarCloud e crie a service connection "SonarCloud" mais a
-# variavel secreta SONAR_TOKEN.
+# variavel secreta SONAR_TOKEN. A integracao precisa de Postgres e RabbitMQ.
 
 trigger:
   branches:

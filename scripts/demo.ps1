@@ -21,7 +21,7 @@ $duplicate = Invoke-RestMethod "$base/webhooks/payments" -Method Post -ContentTy
 $duplicate | ConvertTo-Json
 
 Write-Host "Aguardando o worker retentar e entregar"
-$deadline = (Get-Date).AddSeconds(20)
+$deadline = (Get-Date).AddSeconds(30)
 do {
   Start-Sleep -Seconds 1
   $view = Invoke-RestMethod "$base/webhooks/$key"
@@ -29,7 +29,7 @@ do {
 
 $view | ConvertTo-Json -Depth 5
 if ($view.status -ne "delivered") {
-  throw "A entrega nao concluiu a tempo. Veja os logs com: docker compose logs api"
+  throw "A entrega nao concluiu a tempo. Veja os logs com: docker compose logs worker"
 }
 
 Write-Host "Metricas em $base/metrics"
