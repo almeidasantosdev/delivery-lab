@@ -6,3 +6,8 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["api:3000"]
+
+  - job_name: delivery-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:3001"]

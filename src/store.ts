@@ -1,5 +1,5 @@
-import type { Db } from "./db.js";
-import { HttpError, type WebhookInput } from "./validate.js";
+import type { Db } from "./db";
+import { HttpError, type WebhookInput } from "./validate";
 
 export type AcceptedWebhook = {
   duplicate: boolean;
@@ -27,7 +27,7 @@ export type WebhookView = {
   job: JobView;
 };
 
-type JobRow = {
+export type JobRow = {
   id: string | number;
   webhook_event_id: string | number;
   status: string;
@@ -76,11 +76,13 @@ export async function acceptWebhook(db: Db, input: WebhookInput): Promise<Accept
        RETURNING id`,
       [eventId, input.failUntilAttempt],
     );
+    const jobId = asId(job.rows[0].id);
+    await tx.query(`INSERT INTO outbox (job_id) VALUES ($1)`, [jobId]);
 
     return {
       duplicate: false,
       eventId,
-      jobId: asId(job.rows[0].id),
+      jobId,
       status: "accepted",
       idempotencyKey: input.idempotencyKey,
     };
@@ -144,37 +146,54 @@ export async function getJob(db: Db, jobId: number): Promise<JobView | null> {
   return toJob(row);
 }
 
-export async function claimDueJob(db: Db, staleProcessingMs: number): Promise<JobRow | null> {
+const jobColumns = `id, webhook_event_id, status, attempts, max_attempts, fail_until_attempt, last_error, next_attempt_at`;
+
+export async function getJobRow(db: Db, jobId: number): Promise<JobRow | null> {
+  const result = await db.query<JobRow>(
+    `SELECT ${jobColumns} FROM delivery_jobs WHERE id = $1`,
+    [jobId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function claimJobById(db: Db, jobId: number, expectedAttempts: number): Promise<JobRow | null> {
+  const result = await db.query<JobRow>(
+    `UPDATE delivery_jobs
+     SET status = 'processing',
+         attempts = attempts + 1,
+         updated_at = now()
+     WHERE id = $1
+       AND status = 'pending'
+       AND attempts = $2
+     RETURNING ${jobColumns}`,
+    [jobId, expectedAttempts],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function withNextOutbox(
+  db: Db,
+  publish: (jobId: number) => Promise<void>,
+): Promise<boolean> {
   return db.transaction(async (tx) => {
+    const pending = await tx.query<{ id: string | number; job_id: string | number }>(
+      `SELECT id, job_id
+       FROM outbox
+       WHERE status = 'pending'
+       ORDER BY id
+       FOR UPDATE SKIP LOCKED
+       LIMIT 1`,
+    );
+    const row = pending.rows[0];
+    if (!row) {
+      return false;
+    }
+    await publish(asId(row.job_id));
     await tx.query(
-      `UPDATE delivery_jobs
-       SET status = 'pending', updated_at = now()
-       WHERE status = 'processing'
-         AND updated_at < now() - ($1::int * interval '1 millisecond')`,
-      [staleProcessingMs],
+      `UPDATE outbox SET status = 'published', published_at = now() WHERE id = $1`,
+      [asId(row.id)],
     );
-
-    const claimed = await tx.query<JobRow>(
-      `WITH candidate AS (
-         SELECT id
-         FROM delivery_jobs
-         WHERE status = 'pending'
-           AND next_attempt_at <= now()
-         ORDER BY id
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1
-       )
-       UPDATE delivery_jobs AS j
-       SET status = 'processing',
-           attempts = j.attempts + 1,
-           updated_at = now()
-       FROM candidate
-       WHERE j.id = candidate.id
-       RETURNING j.id, j.webhook_event_id, j.status, j.attempts, j.max_attempts,
-                 j.fail_until_attempt, j.last_error, j.next_attempt_at`,
-    );
-
-    return claimed.rows[0] ?? null;
+    return true;
   });
 }
 

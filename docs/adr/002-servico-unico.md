@@ -1,5 +1,5 @@
 # Um servico so neste laboratorio
 
-A API e o worker vivem no mesmo processo. O worker consulta a tabela `delivery_jobs` com `FOR UPDATE SKIP LOCKED`, entao uma segunda instancia nao pega o mesmo job. Isso mostra o mecanismo de concorrencia sem operar um cluster.
+Decisao original: a API e o worker viviam no mesmo processo. O worker lia `delivery_jobs` com `FOR UPDATE SKIP LOCKED`.
 
-Kubernetes entra num repositorio seguinte, quando esta imagem ja tiver pipeline verde. Subir orquestracao agora aumentaria o laboratorio sem mudar a pergunta que este repo responde: o codigo testa, empacota, sobe e aparece no Grafana.
+Essa decisao foi substituida. A separacao atual esta em `004-nestjs-rabbitmq.md`: a API fica em NestJS e o worker consome o RabbitMQ. Os manifestos do cluster continuam no repositorio irmao `delivery-lab-k8s`.

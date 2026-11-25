@@ -25,3 +25,16 @@ CREATE TABLE IF NOT EXISTS delivery_jobs (
 CREATE INDEX IF NOT EXISTS delivery_jobs_due_idx
   ON delivery_jobs (next_attempt_at)
   WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  job_id BIGINT NOT NULL UNIQUE REFERENCES delivery_jobs (id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ,
+  CONSTRAINT outbox_status_check CHECK (status IN ('pending', 'published'))
+);
+
+CREATE INDEX IF NOT EXISTS outbox_pending_idx
+  ON outbox (id)
+  WHERE status = 'pending';

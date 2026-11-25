@@ -24,3 +24,9 @@ export const deliveryAttempts = new Counter({
   labelNames: ["result"] as const,
   registers: [register],
 });
+
+export const outboxPublished = new Counter({
+  name: "outbox_published_total",
+  help: "Mensagens do outbox publicadas no RabbitMQ",
+  registers: [register],
+});
