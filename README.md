@@ -148,17 +148,17 @@ O arquivo `.github/workflows/ci.yml` roda em todo push e pull request. O job `de
 - Trivy, interrompendo o job se houver vulnerabilidade critica com correcao disponivel
 - gitleaks no historico do Git
 - `terraform fmt` e `terraform validate`
-- SonarCloud. Vulnerabilidade de severidade alta ou bloqueadora interrompe a entrega
+- SonarCloud, apenas quando o segredo `SONAR_TOKEN` existe. Com o segredo, vulnerabilidade de severidade alta ou bloqueadora interrompe a entrega. Sem ele, o job registra a ausencia e o restante da esteira segue
 
 `azure-pipelines.yml` repete essa sequencia no formato do Azure DevOps. Ele passa a executar quando o repositorio estiver ligado a um projeto com a extensao SonarCloud, a service connection `SonarCloud` e a variavel secreta `SONAR_TOKEN`.
 
-No GitHub, o mesmo token entra como segredo do repositorio:
+No GitHub Actions, a analise fica desligada ate o token existir como segredo do repositorio:
 
 ```powershell
 gh secret set SONAR_TOKEN --repo almeidasantosdev/delivery-lab
 ```
 
-A organizacao e a chave do projeto estao em `sonar-project.properties`. No SonarCloud, importe o repositorio publico com essa mesma chave.
+A organizacao e a chave do projeto estao em `sonar-project.properties`. No SonarCloud, importe o repositorio publico com essa mesma chave. Com o segredo configurado, o job `sonar` volta a analisar o codigo e a barrar vulnerabilidade alta ou bloqueadora.
 
 ### 6. Terraform
 
